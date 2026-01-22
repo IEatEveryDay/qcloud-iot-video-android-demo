@@ -4,9 +4,9 @@ name: Android CI - Build APK
 # 触发条件：推送到 new_mian 分支、对 new_mian 分支创建 PR 时触发
 on:
   push:
-    branches: [ "new_mian" ]
+    branches: [ "IEatEveryDay-patch-1" ]
   pull_request:
-    branches: [ "new_mian" ]
+    branches: [ "IEatEveryDay-patch-1" ]
 
 # 定义构建任务
 jobs:
