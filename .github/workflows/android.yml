@@ -1,37 +1,59 @@
-name: Android CI
+# 工作流名称（自定义，会显示在 GitHub Actions 面板）
+name: Android CI - Build APK
 
+# 触发条件：推送到 new_mian 分支、对 new_mian 分支创建 PR 时触发
 on:
   push:
-    branches: [ "new_mian" ]
+    branches: [ "IEatEveryDay-patch-1" ]
   pull_request:
-    branches: [ "new_mian" ]
+    branches: [ "IEatEveryDay-patch-1" ]
 
+# 定义构建任务
 jobs:
-  build:
-
+  build-apk:
+    # 运行环境：Ubuntu 最新版（Android 构建首选 Linux 环境）
     runs-on: ubuntu-latest
-
+    # 环境变量（按需添加，如你的私有仓库凭证）
     env:
       IOT_SONATYPE_USERNAME: ${{ secrets.IOT_SONATYPE_USERNAME }}
       IOT_SONATYPE_PASSWORD: ${{ secrets.IOT_SONATYPE_PASSWORD }}
 
+    # 构建步骤（按顺序执行）
     steps:
-    - uses: actions/checkout@v4
-    - name: set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      # 步骤1：检出代码（关键：拉取完整 Git 仓库，解决 .git 目录缺失问题）
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 拉取完整 Git 历史，强制生成 .git 目录
+          # 若项目包含子模块，需添加：submodules: true
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    - name: Build with Gradle
-      run: ./gradlew build
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: app
-        path: app/build/outputs/apk/debug/TWCallDeviceDemo-debug-1.1.0.apk
+      # 步骤2：配置 JDK 17（匹配你的项目 JDK 版本）
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'          # 项目使用的 JDK 版本
+          distribution: 'temurin'     # 开源 JDK 分发版（推荐）
+          cache: gradle               # 缓存 Gradle 依赖，加速后续构建
+
+      # 步骤3：授予 gradlew 执行权限（Ubuntu 环境默认无执行权限）
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 可选步骤：调试 - 验证 Git 仓库和目录（排查问题用）
+      - name: Debug - Check git repo and directory
+        run: |
+          pwd  # 打印当前工作目录（应是仓库根目录）
+          ls -la .git  # 查看 .git 目录是否存在
+          git status   # 验证 Git 仓库可用
+
+      # 步骤4：构建 Debug 版 APK（核心步骤）
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug  # 仅构建 Debug APK（比 build 更快，避免冗余）
+
+      # 步骤5：上传 APK 作为 Artifact（方便下载）
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TWCallDeviceDemo-debug  # Artifact 名称（自定义）
+          path: app/build/outputs/apk/debug/TWCallDeviceDemo-debug-1.1.0.apk  # APK 实际路径
+          retention-days: 30  # 保留 30 天（可选，默认 90 天）
