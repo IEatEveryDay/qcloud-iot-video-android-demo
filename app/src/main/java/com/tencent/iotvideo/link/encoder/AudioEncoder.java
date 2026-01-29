@@ -79,6 +79,12 @@ public class AudioEncoder {
     private long queueOverflowCount = 0;  // 队列溢出计数
     private long queueUnderflowCount = 0;  // 队列欠载计数
 
+    // ========== 新增：统计far数据全0的次数 ==========
+    private long farZeroDataCount = 0;
+    private long farValidDataCount = 0;
+    private long farEmptyPlayerCount = 0; // 使用emptyPlayerPcm的次数
+    // ==============================================
+
     private static final int SAVE_PCM_DATA = 1;
     private boolean isRecordPcm = true;
     private String speakPcmFilePath = "/storage/emulated/0/speak_pcm_";
@@ -181,6 +187,17 @@ public class AudioEncoder {
 
     public void stop() {
         stopEncode = true;
+        // ========== 新增：停止时输出far数据统计日志 ==========
+        Log.i(TAG, "=== far.pcm 数据统计（停止编码时）===");
+        Log.i(TAG, "far数据全0次数：" + farZeroDataCount);
+        Log.i(TAG, "far数据有效次数：" + farValidDataCount);
+        Log.i(TAG, "使用emptyPlayerPcm次数：" + farEmptyPlayerCount);
+        Log.i(TAG, "far数据全0占比：" + (farZeroDataCount + farValidDataCount == 0 ? 0 : 
+                (farZeroDataCount * 100.0) / (farZeroDataCount + farValidDataCount)) + "%");
+        Log.i(TAG, "队列溢出次数：" + queueOverflowCount);
+        Log.i(TAG, "队列欠载次数：" + queueUnderflowCount);
+        Log.i(TAG, "=====================================");
+        // ===================================================
     }
 
     public boolean isDevicesSupportAEC() {
@@ -294,6 +311,17 @@ public class AudioEncoder {
                     fosNear.flush();
 
                     byte[] farBytesData = (byte[]) jsonObject.get("farPcmBytes");
+                    // ========== 新增：校验写入far的数据是否全0 ==========
+                    boolean isFarZero = isByteArrayAllZero(farBytesData);
+                    if (isFarZero) {
+                        farZeroDataCount++;
+                        if (farZeroDataCount % 10 == 1) { // 每10次全0输出一次日志
+                            Log.w(TAG, "⚠️ 写入far.pcm的数据全0（累计" + farZeroDataCount + "次），数据长度：" + farBytesData.length);
+                        }
+                    } else {
+                        farValidDataCount++;
+                    }
+                    // ===================================================
                     fosFar.write(farBytesData);
                     fosFar.flush();
 
@@ -344,15 +372,30 @@ public class AudioEncoder {
      * @param pcmData 播放器输出的PCM数据
      */
     public void setPlayerPcmData(byte[] pcmData) {
-        if (pcmData == null || pcmData.length == 0) return;
+        if (pcmData == null || pcmData.length == 0) {
+            Log.w(TAG, "⚠️ setPlayerPcmData传入空数据！");
+            return;
+        }
+        // ========== 新增：校验传入的pcmData是否全0 ==========
+        boolean isInputZero = isByteArrayAllZero(pcmData);
+        if (isInputZero) {
+            Log.w(TAG, "⚠️ setPlayerPcmData传入的pcmData全0，长度：" + pcmData.length);
+        }
+        // ===================================================
         
         // 尝试将完整帧加入队列
         if (!playPcmData.offer(pcmData)) {
             // 队列满时丢弃新数据，避免破坏正在读取的旧帧
             queueOverflowCount++;
             if (queueOverflowCount % 100 == 1) {  // 每100次溢出输出一次日志
-                Log.w(TAG, "⚠️ Player PCM queue overflow! Dropped " + queueOverflowCount + " frames. Consider increasing queue size or reducing latency.");
+                Log.w(TAG, "⚠️ Player PCM queue overflow! Dropped " + queueOverflowCount + " frames. Consider increasing queue size or reducing latency. 当前队列大小：" + playPcmData.size());
             }
+        } else {
+            // ========== 新增：队列添加成功日志 ==========
+            if (queueOverflowCount > 0 && queueOverflowCount % 100 == 0) {
+                Log.i(TAG, "✅ Player PCM队列恢复，当前大小：" + playPcmData.size());
+            }
+            // ===========================================
         }
     }
 
@@ -384,10 +427,17 @@ public class AudioEncoder {
                     // 队列为空，数据不足
                     queueUnderflowCount++;
                     if (queueUnderflowCount % 50 == 1) {
-                        Log.w(TAG, "⚠️ Queue underflow #" + queueUnderflowCount + " - requested: " + length + "B, got: " + offset + "B");
+                        Log.w(TAG, "⚠️ Queue underflow #" + queueUnderflowCount + " - requested: " + length + "B, got: " + offset + "B，当前队列大小：" + playPcmData.size());
                     }
                     return null;
                 }
+                
+                // ========== 新增：校验读取的frame是否全0 ==========
+                boolean isFrameZero = isByteArrayAllZero(frame);
+                if (isFrameZero) {
+                    Log.d(TAG, "🔍 从队列读取的frame全0，长度：" + frame.length);
+                }
+                // ===================================================
                 
                 // 拷贝帧数据到结果数组
                 int copyLength = Math.min(frame.length, length - offset);
@@ -395,6 +445,9 @@ public class AudioEncoder {
                 offset += copyLength;
             }
             
+            // ========== 新增：读取成功日志 ==========
+            Log.d(TAG, "✅ onReadPlayerPlayPcm读取成功，长度：" + result.length + "，队列剩余大小：" + playPcmData.size());
+            // =======================================
             return result;
         } catch (Exception e) {
             Log.e(TAG, "onReadPlayerPlayPcm error: " + e.getMessage());
@@ -402,6 +455,20 @@ public class AudioEncoder {
             return null;
         }
     }
+
+    // ========== 新增：工具方法：校验字节数组是否全0 ==========
+    private boolean isByteArrayAllZero(byte[] array) {
+        if (array == null || array.length == 0) {
+            return true;
+        }
+        for (byte b : array) {
+            if (b != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    // =======================================================
 
     private void release() {
         // 输出队列统计信息
@@ -535,6 +602,9 @@ public class AudioEncoder {
                             if (readSize % GVOICE_AEC_USAGE_CONDITION != 0) {
                                 Log.e(TAG, "❌ Mic data length not multiple of 640: " + readSize + ", AEC disabled for this frame");
                             } else {
+                                // ========== 新增：读取前日志 ==========
+                                Log.d(TAG, "🔍 准备读取playerPcm数据，期望长度：" + readSize);
+                                // ===================================
                                 playerPcmBytes = onReadPlayerPlayPcm(readSize);
                                 // 验证播放器数据长度是否匹配
                                 if (playerPcmBytes != null && playerPcmBytes.length == readSize) {
@@ -547,10 +617,17 @@ public class AudioEncoder {
                                     // 播放器数据不足或长度不匹配时，传入空数组进行降噪
                                     byte[] emptyPlayerPcm = new byte[readSize];
                                     processedData = GvoiceJNIBridge.cancellation(tempBuffer, emptyPlayerPcm);
-
-                                    if (playerPcmBytes != null) {
-                                        Log.w(TAG, "⚠️ Gvoice AEC: player data length mismatch! Expected: " + readSize + ", Got: " + playerPcmBytes.length + ", using empty reference");
+                                    // ========== 新增：使用emptyPlayerPcm日志 ==========
+                                    farEmptyPlayerCount++;
+                                    if (farEmptyPlayerCount % 10 == 1) {
+                                        Log.w(TAG, "⚠️ 使用emptyPlayerPcm（全0）作为far数据（累计" + farEmptyPlayerCount + "次）");
+                                        if (playerPcmBytes != null) {
+                                            Log.w(TAG, "   原因：playerPcmBytes长度不匹配，期望：" + readSize + "，实际：" + playerPcmBytes.length);
+                                        } else {
+                                            Log.w(TAG, "   原因：playerPcmBytes为null（队列欠载）");
+                                        }
                                     }
+                                    // ===================================================
 
                                     // 保存PCM数据到文件（使用空数组作为far）
                                     if (isRecordPcm) {
