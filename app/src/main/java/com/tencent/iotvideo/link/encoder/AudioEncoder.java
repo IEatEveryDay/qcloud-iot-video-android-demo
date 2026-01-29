@@ -77,13 +77,13 @@ public class AudioEncoder {
 
     private boolean enableAGC;
     private Context context;
-    private boolean enableGvoiceAEC = false;
+    private boolean enableGvoiceAEC = true;
     // 队列容量：1920 * 10 = 19200字节，可缓存约10帧（600ms音频数据）
     // 足够应对解码器输出抖动和网络波动，同时避免过大延迟
     private ArrayBlockingQueue<Byte> playPcmData = new ArrayBlockingQueue<>(1920 * 2);
 
     private static final int SAVE_PCM_DATA = 1;
-    private boolean isRecordPcm = false;
+    private boolean isRecordPcm = true;
     private String speakPcmFilePath = "/storage/emulated/0/speak_pcm_";
 
     private FileOutputStream fosNear;  // 保存麦克风原始数据
